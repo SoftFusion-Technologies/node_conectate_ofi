@@ -63,10 +63,10 @@ router.put('/sucursales/:id', UR_Sucursal_CTS);
 // (todas protegidas con authenticateToken)
 // ----------------------------------------------------------------
 
-router.post('/usuarios',  CR_Usuario_CTS);
-router.put('/usuarios/:id',  UR_Usuario_CTS);
-router.delete('/usuarios/:id',  ER_Usuario_CTS);
-router.get('/usuarios',  OBRS_Usuarios_CTS);
-router.get('/usuarios/:id',  OBR_Usuario_CTS);
+router.post('/usuarios', authenticateToken, CR_Usuario_CTS);
+router.put('/usuarios/:id', authenticateToken, UR_Usuario_CTS);
+router.delete('/usuarios/:id', authenticateToken, ER_Usuario_CTS);
+router.get('/usuarios', authenticateToken, OBRS_Usuarios_CTS);
+router.get('/usuarios/:id', authenticateToken, OBR_Usuario_CTS);
 
 export default router;
