@@ -6,7 +6,7 @@
  * Descripción:
  * Este archivo (routes.js) define las rutas HTTP para operaciones CRUD en las tablas
  *
- * Tema: Rutas 
+ * Tema: Rutas
  *
  * Capa: Backend
  */
@@ -17,7 +17,7 @@ const router = express.Router();
 import { authenticateToken } from '../Security/auth.js';
 
 // ----------------------------------------------------------------
-// Importar controladores de sucursales (antes: locales)
+// Importar controladores de sucursales
 // ----------------------------------------------------------------
 import {
   OBRS_Sucursales_CTS,
@@ -38,6 +38,14 @@ import {
   UR_Usuario_CTS
 } from '../Controllers/Core/CTS_TB_Usuarios.js';
 
+// ----------------------------------------------------------------
+// Importar controladores de LOGS
+// ----------------------------------------------------------------
+
+import {
+  OBRS_LogsActividad_CTS,
+  OBR_LogActividad_CTS
+} from '../Controllers/Logs/CTS_TB_LogsActividad.js';
 // ----------------------------------------------------------------
 // Rutas para operaciones CRUD en la tabla 'sucursales'
 // (si querés, después le agregamos authenticateToken a todas)
@@ -68,5 +76,13 @@ router.put('/usuarios/:id', authenticateToken, UR_Usuario_CTS);
 router.delete('/usuarios/:id', authenticateToken, ER_Usuario_CTS);
 router.get('/usuarios', authenticateToken, OBRS_Usuarios_CTS);
 router.get('/usuarios/:id', authenticateToken, OBR_Usuario_CTS);
+
+// ----------------------------------------------------------------
+// Rutas para logs de actividad (auditoría)
+// Solo accesibles con token (idealmente admin/supervisor)
+// ----------------------------------------------------------------
+
+router.get('/logs', authenticateToken, OBRS_LogsActividad_CTS);
+router.get('/logs/:id', authenticateToken, OBR_LogActividad_CTS);
 
 export default router;

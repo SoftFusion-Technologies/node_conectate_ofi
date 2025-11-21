@@ -21,6 +21,7 @@
 
 import { Op } from 'sequelize';
 import MD_TB_Sucursales from '../../Models/Core/MD_TB_Sucursales.js';
+import { registrarLogActividad } from '../Logs/CTS_TB_LogsActividad.js';
 
 const SucursalesModel = MD_TB_Sucursales.SucursalesModel;
 
@@ -195,8 +196,16 @@ export const CR_Sucursal_CTS = async (req, res) => {
         estado && ['activo', 'inactivo'].includes(estado) ? estado : undefined
     });
 
-    // TODO: registrar en logs_actividad usando usuario_log_id si corresponde
-
+    await registrarLogActividad({
+      usuario_id: usuario_log_id || null,
+      modulo: 'sucursales',
+      accion: 'CREAR',
+      entidad: 'sucursal',
+      entidad_id: nueva.id,
+      descripcion: `El usuario ${usuario_log_id} creó la sucursal "${nueva.nombre}" (#${nueva.id})`,
+      ip: req.ip,
+      user_agent: req.headers['user-agent']
+    });
     res.json({ message: 'Sucursal creada correctamente', sucursal: nueva });
   } catch (error) {
     console.error('[CR_Sucursal_CTS] error:', error);
@@ -221,8 +230,17 @@ export const ER_Sucursal_CTS = async (req, res) => {
 
     await SucursalesModel.destroy({ where: { id: req.params.id } });
 
-    // TODO: logs_actividad (acción: ELIMINAR_SUCURSAL)
-
+    await registrarLogActividad({
+      usuario_id: usuario_log_id || null,
+      modulo: 'sucursales',
+      accion: 'ELIMINAR',
+      entidad: 'sucursal',
+      entidad_id: sucursal.id,
+      descripcion: `El usuario ${usuario_log_id} eliminó la sucursal "${sucursal.nombre}" (#${sucursal.id}).`,
+      ip: req.ip,
+      user_agent: req.headers['user-agent']
+    });
+    
     res.json({ message: 'Sucursal eliminada correctamente' });
   } catch (error) {
     console.error('[ER_Sucursal_CTS] error:', error);
@@ -295,9 +313,21 @@ export const UR_Sucursal_CTS = async (req, res) => {
     if (updated === 1) {
       const actualizada = await SucursalesModel.findByPk(id);
 
-      // TODO: si cambios.length > 0 y usuario_log_id, registrar en logs_actividad
-      // Ejemplo de descripción:
-      // `El usuario ${usuario_log_id} actualizó la sucursal #${id}: ${cambios.join('; ')}`
+      await registrarLogActividad({
+        usuario_id: usuario_log_id || null,
+        modulo: 'sucursales',
+        accion: 'ACTUALIZAR',
+        entidad: 'sucursal',
+        entidad_id: id,
+        descripcion:
+          cambios.length > 0
+            ? `El usuario ${usuario_log_id} actualizó la sucursal #${id}: ${cambios.join(
+                '; '
+              )}`
+            : `El usuario ${usuario_log_id} ejecutó actualización sin cambios aparentes en la sucursal #${id}`,
+        ip: req.ip,
+        user_agent: req.headers['user-agent']
+      });
 
       res.json({
         message: 'Sucursal actualizada correctamente',
