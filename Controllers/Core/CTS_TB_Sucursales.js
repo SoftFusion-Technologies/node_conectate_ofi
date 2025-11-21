@@ -215,36 +215,63 @@ export const CR_Sucursal_CTS = async (req, res) => {
 
 // ===============================================
 // Eliminar una sucursal
-// (en este ejemplo: DELETE físico; si preferís soft delete, cambiamos a estado = "inactivo")
+// (NO permite eliminar si está referenciada por tickets)
 // ===============================================
 
 export const ER_Sucursal_CTS = async (req, res) => {
   const { usuario_log_id } = req.body; // reservado para futuro log
+  const { id } = req.params;
 
   try {
-    const sucursal = await SucursalesModel.findByPk(req.params.id);
+    const sucursal = await SucursalesModel.findByPk(id);
 
     if (!sucursal) {
       return res.status(404).json({ mensajeError: 'Sucursal no encontrada' });
     }
 
-    await SucursalesModel.destroy({ where: { id: req.params.id } });
+    try {
+      const deleted = await SucursalesModel.destroy({ where: { id } });
 
-    await registrarLogActividad({
-      usuario_id: usuario_log_id || null,
-      modulo: 'sucursales',
-      accion: 'ELIMINAR',
-      entidad: 'sucursal',
-      entidad_id: sucursal.id,
-      descripcion: `El usuario ${usuario_log_id} eliminó la sucursal "${sucursal.nombre}" (#${sucursal.id}).`,
-      ip: req.ip,
-      user_agent: req.headers['user-agent']
-    });
-    
-    res.json({ message: 'Sucursal eliminada correctamente' });
+      if (deleted !== 1) {
+        return res.status(404).json({ mensajeError: 'Sucursal no encontrada' });
+      }
+
+      // Solo logueamos si realmente se eliminó
+      await registrarLogActividad({
+        usuario_id: usuario_log_id || null,
+        modulo: 'sucursales',
+        accion: 'ELIMINAR',
+        entidad: 'sucursal',
+        entidad_id: sucursal.id,
+        descripcion: `El usuario ${usuario_log_id} eliminó la sucursal "${sucursal.nombre}" (#${sucursal.id}).`,
+        ip: req.ip,
+        user_agent: req.headers['user-agent']
+      });
+
+      return res.json({ message: 'Sucursal eliminada correctamente' });
+    } catch (err) {
+      //💥 Acá atrapamos el caso FK
+      if (err.name === 'SequelizeForeignKeyConstraintError') {
+        // Podés filtrar por constraint si querés ser más específico:
+        // if (err.index === 'fk_tickets_sucursal') { ... }
+        return res.status(409).json({
+          mensajeError:
+            'No se puede eliminar la sucursal porque tiene tickets asociados. ' +
+            'Reasigna esos tickets a otra sucursal o ciérralos antes de intentar eliminarla.'
+        });
+      }
+
+      // Otros errores reales los dejamos caer al catch exterior
+      throw err;
+    }
   } catch (error) {
     console.error('[ER_Sucursal_CTS] error:', error);
-    res.status(500).json({ mensajeError: error.message });
+    return res
+      .status(500)
+      .json({
+        mensajeError: 'Error al eliminar la sucursal',
+        detalle: error.message
+      });
   }
 };
 

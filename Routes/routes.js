@@ -13,7 +13,18 @@
 
 import express from 'express';
 const router = express.Router();
-
+// ----------------------------------------------------------------
+// Hora actual del servidor (UTC) para módulo de tickets
+// ----------------------------------------------------------------
+router.get(
+  '/tickets/server-time',
+  (req, res) => {
+    const now = new Date(); // hora del servidor (normalmente sync con NTP)
+    res.json({
+      nowUtc: now.toISOString() // ej: "2025-11-21T22:05:13.123Z"
+    });
+  }
+);
 import { authenticateToken } from '../Security/auth.js';
 import { uploadTicketFiles } from '../Middlewares/uploadTickets.js';
 
@@ -146,6 +157,7 @@ router.get('/tickets/kpis', authenticateToken, OBR_Tickets_KPIs_CTS);
 
 router.get('/tickets', authenticateToken, OBRS_Tickets_CTS);
 router.get('/tickets/:id', authenticateToken, OBR_Ticket_CTS);
+
 router.get('/ticketss/:id', OBR_Ticket_CTS);
 router.post('/tickets', authenticateToken, CR_Ticket_CTS);
 router.put('/tickets/:id', authenticateToken, UR_Ticket_CTS);
@@ -216,5 +228,7 @@ router.post(
 
 // 6) Eliminar
 router.delete('/notificaciones/:id', authenticateToken, ER_Notificacion_CTS);
+
+
 
 export default router;
