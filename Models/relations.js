@@ -127,7 +127,7 @@ export const initModelRelations = () => {
     as: 'notificaciones'
   });
 
-  // Notificación pertenece a un ticket (opcional)
+  // Notificación pertenece a un ticket
   NotificacionesModel.belongsTo(TicketsModel, {
     foreignKey: 'ticket_id',
     as: 'ticket'
@@ -139,9 +139,10 @@ export const initModelRelations = () => {
     as: 'notificaciones_enviadas'
   });
 
+  // 🔵 Alias para ORIGEN → "origen"
   NotificacionesModel.belongsTo(UsuariosModel, {
     foreignKey: 'usuario_origen_id',
-    as: 'usuario_origen'
+    as: 'origen'
   });
 
   // Usuario puede recibir muchas notificaciones
@@ -150,9 +151,10 @@ export const initModelRelations = () => {
     as: 'notificaciones_recibidas'
   });
 
+  // 🔵 Alias para DESTINO → "destino"
   NotificacionesModel.belongsTo(UsuariosModel, {
     foreignKey: 'usuario_destino_id',
-    as: 'usuario_destino'
+    as: 'destino'
   });
 
   // ============================
