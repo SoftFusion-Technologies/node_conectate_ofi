@@ -31,12 +31,13 @@ import { Op } from 'sequelize';
 import MD_TB_Notificaciones from '../../Models/Tickets/MD_TB_Notificaciones.js';
 import MD_TB_Tickets from '../../Models/Tickets/MD_TB_Tickets.js';
 import MD_TB_Usuarios from '../../Models/Core/MD_TB_Usuarios.js';
-
+import MD_TB_Sucursales from '../../Models/Core/MD_TB_Sucursales.js';
 import { registrarLogActividad } from '../Logs/CTS_TB_LogsActividad.js';
 
 const { NotificacionesModel } = MD_TB_Notificaciones;
 const { TicketsModel } = MD_TB_Tickets;
 const { UsuariosModel } = MD_TB_Usuarios;
+const { SucursalesModel } = MD_TB_Sucursales;
 
 const CANALES_VALIDOS = ['interno', 'email', 'whatsapp', 'otro'];
 const ESTADOS_ENVIO_VALIDOS = ['pendiente', 'enviado', 'error'];
@@ -200,18 +201,32 @@ export const OBRS_Notificaciones_CTS = async (req, res) => {
       include: [
         {
           model: UsuariosModel,
-          as: 'origen',
+          as: 'origen', // 👈 alias que ya definimos en relations
           attributes: ['id', 'nombre', 'email', 'rol']
         },
         {
           model: UsuariosModel,
-          as: 'destino',
+          as: 'destino', // 👈 idem
           attributes: ['id', 'nombre', 'email', 'rol']
         },
         {
           model: TicketsModel,
           as: 'ticket',
-          attributes: ['id', 'estado', 'fecha_ticket', 'sucursal_id']
+          attributes: [
+            'id',
+            'estado',
+            'fecha_ticket',
+            'hora_ticket',
+            'sucursal_id',
+            'asunto'
+          ],
+          include: [
+            {
+              model: SucursalesModel,
+              as: 'sucursal',
+              attributes: ['id', 'nombre', 'codigo', 'ciudad']
+            }
+          ]
         }
       ]
     });
@@ -553,9 +568,7 @@ export const OBR_Notificaciones_Resumen_CTS = async (req, res) => {
     const { id: usuarioIdCtx } = getUserContext(req);
 
     if (!usuarioIdCtx) {
-      return res
-        .status(401)
-        .json({ mensajeError: 'Usuario no autenticado.' });
+      return res.status(401).json({ mensajeError: 'Usuario no autenticado.' });
     }
 
     // Total de no leídas
