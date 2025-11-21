@@ -31,6 +31,37 @@ initModelRelations();
 
 import { initUploadDirs } from './Utils/fileManager.js';
 await initUploadDirs(); // crea carpetas de uploads si no existen
+
+import { verifyMailer } from './Utils/mailer.js';
+verifyMailer(); // solo loguea OK o FAIL al arrancar
+
+
+// import { sendTicketCreatedMail } from './Utils/ticketMailService.js';
+
+// const ticket = {
+//   id: 8,
+//   asunto: 'PRUEBA NOTIFICACION',
+//   estado: 'pendiente',
+//   created_at: new Date()
+// };
+
+// const operador = {
+//   nombre: 'Benjamín Orellana',
+//   email: 'goosta19802@gmail.com'
+// };
+
+// const sucursal = {
+//   nombre: 'SAN MIGUEL',
+//   ciudad: 'San Miguel'
+// };
+
+// const destinatario = {
+//   nombre: 'Hugo Carrazan',
+//   email: 'goosta19802@gmail.com'
+// };
+
+// await sendTicketCreatedMail({ ticket, operador, sucursal, destinatario });
+
 // CONFIGURACION PRODUCCION
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();

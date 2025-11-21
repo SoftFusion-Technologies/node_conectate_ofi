@@ -58,7 +58,8 @@ import {
   CR_Ticket_CTS,
   UR_Ticket_CTS,
   ER_Ticket_CTS,
-  CR_Ticket_CambiarEstado_CTS
+  CR_Ticket_CambiarEstado_CTS,
+  OBR_Tickets_KPIs_CTS
 } from '../Controllers/Tickets/CTS_TB_Tickets.js';
 
 // ----------------------------------------------------------------
@@ -115,7 +116,6 @@ router.get('/logs/:id', authenticateToken, OBR_LogActividad_CTS);
 // Solo accesibles con token (idealmente admin/supervisor)
 // ----------------------------------------------------------------
 
-
 import {
   OBRS_TicketEstadosHistorial_CTS,
   OBR_TicketEstadoHistorial_CTS
@@ -142,8 +142,11 @@ router.get(
   OBR_TicketEstadoHistorial_CTS
 );
 
+router.get('/tickets/kpis', authenticateToken, OBR_Tickets_KPIs_CTS);
+
 router.get('/tickets', authenticateToken, OBRS_Tickets_CTS);
 router.get('/tickets/:id', authenticateToken, OBR_Ticket_CTS);
+router.get('/ticketss/:id', OBR_Ticket_CTS);
 router.post('/tickets', authenticateToken, CR_Ticket_CTS);
 router.put('/tickets/:id', authenticateToken, UR_Ticket_CTS);
 router.delete('/tickets/:id', authenticateToken, ER_Ticket_CTS);
@@ -152,7 +155,6 @@ router.post(
   authenticateToken,
   CR_Ticket_CambiarEstado_CTS
 );
-
 
 // ----------------------------------------------------------------
 // Rutas para TICKETS ADJUNTOS
@@ -189,24 +191,30 @@ import {
   OBR_Notificaciones_Resumen_CTS
 } from '../Controllers/Tickets/CTS_TB_Notificaciones.js';
 
+// 1) Resumen (campanita) – PRIMERO
+router.get(
+  '/notificaciones/resumen',
+  authenticateToken,
+  OBR_Notificaciones_Resumen_CTS
+);
+
+// 2) Listado general
 router.get('/notificaciones', authenticateToken, OBRS_Notificaciones_CTS);
 
+// 3) Detalle por id
 router.get('/notificaciones/:id', authenticateToken, OBR_Notificacion_CTS);
 
+// 4) Crear
 router.post('/notificaciones', authenticateToken, CR_Notificacion_CTS);
 
+// 5) Marcar como leída
 router.post(
   '/notificaciones/:id/marcar-leida',
   authenticateToken,
   UR_Notificacion_MarcarLeida_CTS
 );
 
+// 6) Eliminar
 router.delete('/notificaciones/:id', authenticateToken, ER_Notificacion_CTS);
 
-// Resumen de notificaciones (campanita)
-router.get(
-  '/notificaciones/resumen',
-  authenticateToken,
-  OBR_Notificaciones_Resumen_CTS
-);
 export default router;

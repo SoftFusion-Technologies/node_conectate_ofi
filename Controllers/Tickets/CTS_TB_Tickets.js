@@ -28,6 +28,10 @@ import MD_TB_Usuarios from '../../Models/Core/MD_TB_Usuarios.js';
 import MD_TB_Notificaciones from '../../Models/Tickets/MD_TB_Notificaciones.js';
 
 import { registrarLogActividad } from '../Logs/CTS_TB_LogsActividad.js';
+import {
+  crearNotificacionesPorTicketCreado,
+  enviarEmailsPorTicketCreado
+} from '../../Utils/notificacionesTicketService.js';
 
 const { TicketsModel } = MD_TB_Tickets;
 const { TicketEstadosHistorialModel } = MD_TB_TicketEstadosHistorial;
@@ -112,67 +116,6 @@ const obtenerDestinatariosSupervisionPorSucursal = async (sucursalId) => {
   return admins;
 };
 
-/**
- * Crea notificaciones internas para los supervisores/admins correspondientes
- * cuando se crea un ticket nuevo.
- */
-const crearNotificacionesTicketNuevo = async ({
-  ticket,
-  sucursalId,
-  usuarioCreadorId,
-  req
-}) => {
-  try {
-    const destinatarios = await obtenerDestinatariosSupervisionPorSucursal(
-      sucursalId
-    );
-
-    if (!destinatarios || destinatarios.length === 0) {
-      // No hay nadie a quién notificar, no rompemos nada.
-      console.warn(
-        `[crearNotificacionesTicketNuevo] No se encontraron destinatarios para sucursal_id=${sucursalId}`
-      );
-      return;
-    }
-
-    const asuntoNotif = `Nuevo ticket #${ticket.id} creado`;
-    const mensajeNotif = `Se ha creado el ticket #${ticket.id} en la sucursal_id=${sucursalId} con estado "abierto" y asunto: "${ticket.asunto}".`;
-
-    await Promise.all(
-      destinatarios.map(async (dest) => {
-        const notif = await NotificacionesModel.create({
-          ticket_id: ticket.id,
-          usuario_origen_id: usuarioCreadorId || null,
-          usuario_destino_id: dest.id,
-          canal: 'interno',
-          asunto: asuntoNotif,
-          mensaje: mensajeNotif,
-          estado_envio: 'pendiente',
-          fecha_envio: null,
-          fecha_lectura: null
-        });
-
-        // Log por cada notificación creada automáticamente
-        await registrarLogActividad({
-          usuario_id: usuarioCreadorId || null,
-          modulo: 'notificaciones',
-          accion: 'CREAR_AUTO_TICKET',
-          entidad: 'notificacion',
-          entidad_id: notif.id,
-          descripcion: `Notificación automática #${notif.id} por creación de ticket #${ticket.id} para el usuario destino #${dest.id}.`,
-          ip: req.ip,
-          user_agent: req.headers['user-agent']
-        });
-      })
-    );
-  } catch (err) {
-    // MUY IMPORTANTE: nunca romper la creación del ticket por culpa de las notificaciones
-    console.error(
-      '[crearNotificacionesTicketNuevo] Error creando notificaciones automáticas:',
-      err
-    );
-  }
-};
 
 // ===================================================
 // 1) Listado de tickets (paginado + filtros + permisos)
@@ -396,26 +339,37 @@ export const CR_Ticket_CTS = async (req, res) => {
     });
   }
 
+  let transaction;
+
   try {
-    // Determinar sucursal: si viene en body la validamos, si no tomamos la del usuario
+    // ============================
+    // 1) Iniciamos transacción
+    // ============================
+    transaction = await TicketsModel.sequelize.transaction();
+
+    // ============================
+    // 2) Determinar sucursal
+    // ============================
     let sucursalFinalId = null;
     if (sucursal_id) {
       const sid = Number(sucursal_id);
       if (Number.isNaN(sid)) {
+        await transaction.rollback();
         return res
           .status(400)
           .json({ mensajeError: 'El campo sucursal_id debe ser numérico' });
       }
-      const sucursal = await SucursalesModel.findByPk(sid);
+      const sucursal = await SucursalesModel.findByPk(sid, { transaction });
       if (!sucursal) {
+        await transaction.rollback();
         return res
           .status(400)
           .json({ mensajeError: `No existe la sucursal con id=${sid}` });
       }
       sucursalFinalId = sid;
     } else {
-      // Si no se envía sucursal_id, tomamos la sucursal del usuario (si la tiene)
       if (!sucursalCtx) {
+        await transaction.rollback();
         return res.status(400).json({
           mensajeError:
             'No se pudo determinar la sucursal. Envíe sucursal_id o asigne sucursal al usuario.'
@@ -424,35 +378,64 @@ export const CR_Ticket_CTS = async (req, res) => {
       sucursalFinalId = sucursalCtx;
     }
 
-    // El creador del ticket es el usuario logueado
+    // ============================
+    // 3) Validar usuario creador
+    // ============================
     if (!usuarioIdCtx) {
+      await transaction.rollback();
       return res.status(400).json({
         mensajeError:
           'No se pudo determinar el usuario creador (req.user.id nulo)'
       });
     }
 
-    const nuevo = await TicketsModel.create({
-      fecha_ticket,
-      hora_ticket: hora_ticket || null,
-      sucursal_id: sucursalFinalId,
-      usuario_creador_id: usuarioIdCtx,
-      estado: 'pendiente',
-      asunto: asunto.trim(),
-      descripcion: descripcion || null,
-      observaciones_supervisor: null
+    // ============================
+    // 4) Crear ticket
+    // ============================
+    const nuevo = await TicketsModel.create(
+      {
+        fecha_ticket,
+        hora_ticket: hora_ticket || null,
+        sucursal_id: sucursalFinalId,
+        usuario_creador_id: usuarioIdCtx,
+        estado: 'pendiente',
+        asunto: asunto.trim(),
+        descripcion: descripcion || null,
+        observaciones_supervisor: null
+      },
+      { transaction }
+    );
+
+    // ============================
+    // 5) Registrar primer historial de estado
+    // ============================
+    await TicketEstadosHistorialModel.create(
+      {
+        ticket_id: nuevo.id,
+        estado_anterior: null,
+        estado_nuevo: 'pendiente',
+        usuario_id: usuarioIdCtx,
+        comentario: 'Ticket creado'
+      },
+      { transaction }
+    );
+
+    // ============================
+    // 6) Crear notificaciones internas + email (pendiente)
+    // ============================
+    await crearNotificacionesPorTicketCreado({
+      ticket: nuevo,
+      transaction
     });
 
-    // Registrar primer historial de estado
-    await TicketEstadosHistorialModel.create({
-      ticket_id: nuevo.id,
-      estado_anterior: null,
-      estado_nuevo: 'pendiente',
-      usuario_id: usuarioIdCtx,
-      comentario: 'Ticket creado'
-    });
+    // ============================
+    // 7) Commit de la transacción
+    // ============================
+    await transaction.commit();
 
-    // Registrar log de creación de ticket
+    // ============================
+    // 8) Registrar log (fuera de la transacción)
+    // ============================
     await registrarLogActividad({
       usuario_id: usuarioLog,
       modulo: 'tickets',
@@ -464,22 +447,39 @@ export const CR_Ticket_CTS = async (req, res) => {
       user_agent: req.headers['user-agent']
     });
 
-    // ----------------------------------------------------
-    // 🔔 Notificaciones automáticas al supervisor por sucursal
-    // ----------------------------------------------------
-    await crearNotificacionesTicketNuevo({
-      ticket: nuevo,
-      sucursalId: sucursalFinalId,
-      usuarioCreadorId: usuarioIdCtx,
-      req
+    // ============================
+    // 9) Enviar emails en background
+    // ============================
+    enviarEmailsPorTicketCreado(nuevo.id).catch((err) => {
+      console.error(
+        `[CR_Ticket_CTS] Error al enviar emails de ticket creado #${nuevo.id}:`,
+        err.message
+      );
     });
 
-    res.json({ message: 'Ticket creado correctamente', ticket: nuevo });
+    // Respuesta OK
+    return res.json({
+      message: 'Ticket creado correctamente',
+      ticket: nuevo
+    });
   } catch (error) {
     console.error('[CR_Ticket_CTS] error:', error);
-    res.status(500).json({ mensajeError: error.message });
+
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (e) {
+        console.error(
+          '[CR_Ticket_CTS] Error al hacer rollback de la transacción:',
+          e.message
+        );
+      }
+    }
+
+    return res.status(500).json({ mensajeError: error.message });
   }
 };
+
 
 // ===================================================
 // 4) Actualizar ticket (datos básicos, NO estado)
@@ -746,11 +746,149 @@ export const CR_Ticket_CambiarEstado_CTS = async (req, res) => {
   }
 };
 
+// ===================================================
+// 7) KPIs / Resumen de tickets para dashboard
+// GET /tickets/kpis
+//
+// Responde algo así:
+// {
+//   total: number,
+//   porEstado: {
+//     abierto: number,
+//     pendiente: number,
+//     autorizado: number,
+//     rechazado: number,
+//     cerrado: number
+//   },
+//   hoy: {
+//     fecha: 'YYYY-MM-DD',
+//     total: number,
+//     porEstado: { ... }
+//   }
+// }
+// Reglas:
+//   - operador_sucursal: KPIs solo de sus tickets (usuario_creador_id = req.user.id)
+//   - supervisor/admin: KPIs globales, con filtro opcional ?sucursal_id=
+// ===================================================
+
+export const OBR_Tickets_KPIs_CTS = async (req, res) => {
+  try {
+    const {
+      id: usuarioIdCtx,
+      rol,
+      sucursal_id: sucursalCtx
+    } = getUserContext(req);
+
+    if (!usuarioIdCtx) {
+      return res
+        .status(401)
+        .json({ mensajeError: 'Usuario no autenticado.' });
+    }
+
+    const { sucursal_id: sucursalFiltro } = req.query || {};
+
+    // Base de filtros por rol
+    const baseWhere = {};
+
+    if (rol === 'operador_sucursal') {
+      // KPIs solo de sus tickets
+      baseWhere.usuario_creador_id = usuarioIdCtx || 0;
+    } else {
+      // supervisor / admin
+      let sucursalIdFinal = null;
+
+      if (sucursalFiltro) {
+        const sid = Number(sucursalFiltro);
+        if (!Number.isNaN(sid)) sucursalIdFinal = sid;
+      } else if (rol === 'supervisor' && sucursalCtx) {
+        // supervisor puede ver por defecto su propia sucursal
+        sucursalIdFinal = sucursalCtx;
+      }
+
+      if (sucursalIdFinal) {
+        baseWhere.sucursal_id = sucursalIdFinal;
+      }
+    }
+
+    const contarEstado = (estado, extraWhere = {}) =>
+      TicketsModel.count({
+        where: {
+          ...baseWhere,
+          ...(estado ? { estado } : {}),
+          ...extraWhere
+        }
+      });
+
+    // -------- KPIs globales --------
+    const [
+      total,
+      abiertos,
+      pendientes,
+      autorizados,
+      rechazados,
+      cerrados
+    ] = await Promise.all([
+      contarEstado(null),
+      contarEstado('abierto'),
+      contarEstado('pendiente'),
+      contarEstado('autorizado'),
+      contarEstado('rechazado'),
+      contarEstado('cerrado')
+    ]);
+
+    // -------- KPIs de HOY --------
+    const hoyStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filtroHoy = { fecha_ticket: hoyStr };
+
+    const [
+      totalHoy,
+      abiertosHoy,
+      pendientesHoy,
+      autorizadosHoy,
+      rechazadosHoy,
+      cerradosHoy
+    ] = await Promise.all([
+      contarEstado(null, filtroHoy),
+      contarEstado('abierto', filtroHoy),
+      contarEstado('pendiente', filtroHoy),
+      contarEstado('autorizado', filtroHoy),
+      contarEstado('rechazado', filtroHoy),
+      contarEstado('cerrado', filtroHoy)
+    ]);
+
+    return res.json({
+      total,
+      porEstado: {
+        abierto: abiertos,
+        pendiente: pendientes,
+        autorizado: autorizados,
+        rechazado: rechazados,
+        cerrado: cerrados
+      },
+      hoy: {
+        fecha: hoyStr,
+        total: totalHoy,
+        porEstado: {
+          abierto: abiertosHoy,
+          pendiente: pendientesHoy,
+          autorizado: autorizadosHoy,
+          rechazado: rechazadosHoy,
+          cerrado: cerradosHoy
+        }
+      }
+    });
+  } catch (error) {
+    console.error('[OBR_Tickets_KPIs_CTS] error:', error);
+    res.status(500).json({ mensajeError: error.message });
+  }
+};
+
 export default {
   OBRS_Tickets_CTS,
   OBR_Ticket_CTS,
   CR_Ticket_CTS,
   UR_Ticket_CTS,
   ER_Ticket_CTS,
-  CR_Ticket_CambiarEstado_CTS
+  CR_Ticket_CambiarEstado_CTS,
+  OBR_Tickets_KPIs_CTS
 };
