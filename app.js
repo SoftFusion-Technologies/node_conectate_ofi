@@ -29,6 +29,8 @@ initModelRelations();
 // o:
 // initAuthoritativeTime();
 
+import { initUploadDirs } from './Utils/fileManager.js';
+await initUploadDirs(); // crea carpetas de uploads si no existen
 // CONFIGURACION PRODUCCION
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
