@@ -61,8 +61,9 @@ function buildMensajeTicketCreado({ ticket, operador, sucursal, canalTexto }) {
 }
 
 /**
- * Regla de negocio actual:
- *  - Destinatarios = operador creador + todos los supervisores activos con email
+ * Regla de negocio:
+ *  - Notificación interna: operador creador + todos los supervisores activos con email
+ *  - Email: solo supervisores activos con email (independiente de sucursal)
  */
 async function obtenerDestinatariosTicketCreado({ ticket, transaction }) {
   // Operador creador
@@ -70,7 +71,7 @@ async function obtenerDestinatariosTicketCreado({ ticket, transaction }) {
     transaction
   });
 
-  // Supervisores activos (MVP: todos, luego podemos filtrar por sucursal)
+  // Supervisores activos (sin importar sucursal)
   const supervisores = await UsuariosModel.findAll({
     where: {
       rol: 'supervisor',
@@ -79,17 +80,20 @@ async function obtenerDestinatariosTicketCreado({ ticket, transaction }) {
     transaction
   });
 
-  // Filtramos solo los que tienen email
-  const destinatarios = [
+  // Destinatarios internos = operador + supervisores (si tienen email), sin duplicados
+  const destinatariosInternos = [
     ...(operador ? [operador] : []),
     ...supervisores
-  ].filter((u, index, arr) => {
-    if (!u.email) return false;
-    // evitar duplicar si operador también es supervisor
-    return arr.findIndex((x) => x.id === u.id) === index;
-  });
+  ]
+    .filter((u) => !!u.email)
+    .filter((u, index, arr) => arr.findIndex((x) => x.id === u.id) === index);
 
-  return { operador, supervisores, destinatarios };
+  // Destinatarios email = solo supervisores con email (sin duplicados)
+  const destinatariosEmail = supervisores
+    .filter((u) => !!u.email)
+    .filter((u, index, arr) => arr.findIndex((x) => x.id === u.id) === index);
+
+  return { operador, supervisores, destinatariosInternos, destinatariosEmail };
 }
 
 /**
@@ -107,17 +111,18 @@ export async function crearNotificacionesPorTicketCreado({
   const sucursal = await SucursalesModel.findByPk(ticket.sucursal_id, {
     transaction
   });
-  const { operador, destinatarios } = await obtenerDestinatariosTicketCreado({
-    ticket,
-    transaction
-  });
+  const { operador, destinatariosInternos, destinatariosEmail } =
+    await obtenerDestinatariosTicketCreado({
+      ticket,
+      transaction
+    });
 
   const asunto = buildAsuntoTicketCreado(ticket);
 
   const notifsCreadas = [];
 
-  for (const dest of destinatarios) {
-    // Notificación interna (para el centro que ya tenés)
+  // 🔹 1) Notificaciones internas (operador + supervisores)
+  for (const dest of destinatariosInternos) {
     const mensajeInterno = buildMensajeTicketCreado({
       ticket,
       operador,
@@ -139,8 +144,10 @@ export async function crearNotificacionesPorTicketCreado({
     );
 
     notifsCreadas.push(notifInterna);
+  }
 
-    // Notificación para email (cola)
+  // 🔹 2) Notificaciones de email (SOLO supervisores)
+  for (const dest of destinatariosEmail) {
     const mensajeEmail = buildMensajeTicketCreado({
       ticket,
       operador,
@@ -164,7 +171,27 @@ export async function crearNotificacionesPorTicketCreado({
     notifsCreadas.push(notifEmail);
   }
 
-  return { sucursal, operador, destinatarios, notifsCreadas };
+  console.log('[Notifs Ticket]', {
+    ticketId: ticket.id,
+    internos: destinatariosInternos.map((u) => ({
+      id: u.id,
+      email: u.email,
+      rol: u.rol
+    })),
+    email: destinatariosEmail.map((u) => ({
+      id: u.id,
+      email: u.email,
+      rol: u.rol
+    }))
+  });
+
+  return {
+    sucursal,
+    operador,
+    destinatariosInternos,
+    destinatariosEmail,
+    notifsCreadas
+  };
 }
 
 /**
@@ -180,7 +207,9 @@ export async function enviarEmailsPorTicketCreado(ticketId) {
   // Cargamos el ticket con datos básicos
   const ticket = await TicketsModel.findByPk(ticketId);
   if (!ticket) {
-    console.warn(`enviarEmailsPorTicketCreado: ticket ${ticketId} no encontrado.`);
+    console.warn(
+      `enviarEmailsPorTicketCreado: ticket ${ticketId} no encontrado.`
+    );
     return;
   }
 
@@ -206,7 +235,9 @@ export async function enviarEmailsPorTicketCreado(ticketId) {
 
   for (const notif of notifsPendientes) {
     try {
-      const destinatario = await UsuariosModel.findByPk(notif.usuario_destino_id);
+      const destinatario = await UsuariosModel.findByPk(
+        notif.usuario_destino_id
+      );
       if (!destinatario || !destinatario.email) {
         console.warn(
           `Notificación ${notif.id}: destinatario sin email, se marca como error.`
