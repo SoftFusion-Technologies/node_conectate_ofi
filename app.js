@@ -35,7 +35,6 @@ await initUploadDirs(); // crea carpetas de uploads si no existen
 import { verifyMailer } from './Utils/mailer.js';
 verifyMailer(); // solo loguea OK o FAIL al arrancar
 
-
 // import { sendTicketCreatedMail } from './Utils/ticketMailService.js';
 
 // const ticket = {
@@ -73,7 +72,12 @@ if (process.env.NODE_ENV !== 'production') {
 const app = express();
 
 /*  🔑 CORS configurado con whitelist y credenciales */
-const CORS_WHITELIST = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const CORS_WHITELIST = new Set([
+  'https://conectategroup.ar',
+  'https://www.conectategroup.ar',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173'
+]);
 
 const corsOptions = {
   origin(origin, cb) {

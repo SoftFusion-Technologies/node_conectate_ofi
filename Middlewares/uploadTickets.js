@@ -59,7 +59,7 @@ const storageTickets = multer.diskStorage({
 const multerTickets = multer({
   storage: storageTickets,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50 MB
+    fileSize: 100 * 1024 * 1024 // 100 MB
   },
   fileFilter: (req, file, cb) => {
     // Acá podrías filtrar por tipo/mime si querés

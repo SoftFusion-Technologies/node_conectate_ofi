@@ -27,6 +27,7 @@ router.get(
 );
 import { authenticateToken } from '../Security/auth.js';
 import { uploadTicketFiles } from '../Middlewares/uploadTickets.js';
+import { uploadErrorHandler } from '../Middlewares/uploadErrorHandler.js';
 
 // ----------------------------------------------------------------
 // Importamos controladores de sucursales
@@ -188,7 +189,8 @@ router.post(
   '/tickets/:ticketId/adjuntos',
   authenticateToken,
   uploadTicketFiles,
-  CR_TicketAdjunto_CTS
+  CR_TicketAdjunto_CTS,
+  uploadErrorHandler
 );
 
 // Eliminar adjunto
