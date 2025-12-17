@@ -28,10 +28,10 @@ import MD_TB_Usuarios from '../../Models/Core/MD_TB_Usuarios.js';
 import MD_TB_Notificaciones from '../../Models/Tickets/MD_TB_Notificaciones.js';
 
 import { registrarLogActividad } from '../Logs/CTS_TB_LogsActividad.js';
-import {
-  crearNotificacionesPorTicketCreado,
-  enviarEmailsPorTicketCreado
-} from '../../Utils/notificacionesTicketService.js';
+// import {
+//   crearNotificacionesPorTicketCreado,
+//   enviarEmailsPorTicketCreado
+// } from '../../Utils/notificacionesTicketService.js';
 
 const { TicketsModel } = MD_TB_Tickets;
 const { TicketEstadosHistorialModel } = MD_TB_TicketEstadosHistorial;
@@ -115,7 +115,6 @@ const obtenerDestinatariosSupervisionPorSucursal = async (sucursalId) => {
 
   return admins;
 };
-
 
 // ===================================================
 // 1) Listado de tickets (paginado + filtros + permisos)
@@ -390,7 +389,7 @@ export const CR_Ticket_CTS = async (req, res) => {
     }
 
     // ============================
-    // 4) Crear ticket
+    // 4) Crear ticket (BORRADOR)
     // ============================
     const nuevo = await TicketsModel.create(
       {
@@ -398,7 +397,9 @@ export const CR_Ticket_CTS = async (req, res) => {
         hora_ticket: hora_ticket || null,
         sucursal_id: sucursalFinalId,
         usuario_creador_id: usuarioIdCtx,
-        estado: 'pendiente',
+        // estado: 'pendiente',
+        estado: 'pendiente_adjuntos', // para evitar que no suban archivos
+
         asunto: asunto.trim(),
         descripcion: descripcion || null,
         observaciones_supervisor: null
@@ -413,9 +414,10 @@ export const CR_Ticket_CTS = async (req, res) => {
       {
         ticket_id: nuevo.id,
         estado_anterior: null,
-        estado_nuevo: 'pendiente',
+        // estado_nuevo: 'pendiente',
+        estado_nuevo: 'pendiente_adjuntos', // para evitar que no suban archivos
         usuario_id: usuarioIdCtx,
-        comentario: 'Ticket creado'
+        comentario: 'Ticket creado (pendiente de adjuntos)'
       },
       { transaction }
     );
@@ -423,10 +425,11 @@ export const CR_Ticket_CTS = async (req, res) => {
     // ============================
     // 6) Crear notificaciones internas + email (pendiente)
     // ============================
-    await crearNotificacionesPorTicketCreado({
-      ticket: nuevo,
-      transaction
-    });
+    // ya no mandamos la notificacion al momento de crear el ticket
+    // await crearNotificacionesPorTicketCreado({
+    //   ticket: nuevo,
+    //   transaction
+    // });
 
     // ============================
     // 7) Commit de la transacción
@@ -442,7 +445,7 @@ export const CR_Ticket_CTS = async (req, res) => {
       accion: 'CREAR',
       entidad: 'ticket',
       entidad_id: nuevo.id,
-      descripcion: `El usuario ${usuarioLog} creó el ticket #${nuevo.id} (sucursal_id=${sucursalFinalId}, asunto="${nuevo.asunto}")`,
+      descripcion: `El usuario ${usuarioLog} creó borrador del ticket #${nuevo.id} (sucursal_id=${sucursalFinalId}, asunto="${nuevo.asunto}")`,
       ip: req.ip,
       user_agent: req.headers['user-agent']
     });
@@ -450,16 +453,18 @@ export const CR_Ticket_CTS = async (req, res) => {
     // ============================
     // 9) Enviar emails en background
     // ============================
-    enviarEmailsPorTicketCreado(nuevo.id).catch((err) => {
-      console.error(
-        `[CR_Ticket_CTS] Error al enviar emails de ticket creado #${nuevo.id}:`,
-        err.message
-      );
-    });
+    // ya no mandamos la notificacion al momento de crear el ticket
+    // enviarEmailsPorTicketCreado(nuevo.id).catch((err) => {
+    //   console.error(
+    //     `[CR_Ticket_CTS] Error al enviar emails de ticket creado #${nuevo.id}:`,
+    //     err.message
+    //   );
+    // });
 
     // Respuesta OK
     return res.json({
-      message: 'Ticket creado correctamente',
+      // message: 'Ticket creado correctamente',
+      message: 'Ticket creado (pendiente de adjuntos)', // hacemos que sea obligatorio al cargar el ticket
       ticket: nuevo
     });
   } catch (error) {
@@ -479,7 +484,6 @@ export const CR_Ticket_CTS = async (req, res) => {
     return res.status(500).json({ mensajeError: error.message });
   }
 };
-
 
 // ===================================================
 // 4) Actualizar ticket (datos básicos, NO estado)
@@ -780,9 +784,7 @@ export const OBR_Tickets_KPIs_CTS = async (req, res) => {
     } = getUserContext(req);
 
     if (!usuarioIdCtx) {
-      return res
-        .status(401)
-        .json({ mensajeError: 'Usuario no autenticado.' });
+      return res.status(401).json({ mensajeError: 'Usuario no autenticado.' });
     }
 
     const { sucursal_id: sucursalFiltro } = req.query || {};
@@ -820,21 +822,15 @@ export const OBR_Tickets_KPIs_CTS = async (req, res) => {
       });
 
     // -------- KPIs globales --------
-    const [
-      total,
-      abiertos,
-      pendientes,
-      autorizados,
-      rechazados,
-      cerrados
-    ] = await Promise.all([
-      contarEstado(null),
-      contarEstado('abierto'),
-      contarEstado('pendiente'),
-      contarEstado('autorizado'),
-      contarEstado('rechazado'),
-      contarEstado('cerrado')
-    ]);
+    const [total, abiertos, pendientes, autorizados, rechazados, cerrados] =
+      await Promise.all([
+        contarEstado(null),
+        contarEstado('abierto'),
+        contarEstado('pendiente'),
+        contarEstado('autorizado'),
+        contarEstado('rechazado'),
+        contarEstado('cerrado')
+      ]);
 
     // -------- KPIs de HOY --------
     const hoyStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD

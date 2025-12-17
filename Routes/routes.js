@@ -186,7 +186,6 @@ router.get(
 router.get('/tickets/adjuntos/:id', authenticateToken, OBR_TicketAdjunto_CTS);
 router.get(
   '/tickets/adjuntos/:id/file',
-  authenticateToken,
   FILE_TicketAdjunto_CTS
 );
 

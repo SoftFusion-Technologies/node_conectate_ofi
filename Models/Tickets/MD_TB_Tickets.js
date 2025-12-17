@@ -59,7 +59,8 @@ export const TicketsModel = db.define(
         'pendiente',
         'autorizado',
         'rechazado',
-        'cerrado'
+        'cerrado',
+        'pendiente_adjuntos' // Adicionamos este nuevo estado, para gestionar tickets que requieren adjuntos es decir obligatorio
       ),
       allowNull: false,
       defaultValue: 'abierto',

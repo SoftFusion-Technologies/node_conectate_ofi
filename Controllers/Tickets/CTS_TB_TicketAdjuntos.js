@@ -30,6 +30,7 @@ import { Op } from 'sequelize';
 import MD_TB_TicketAdjuntos from '../../Models/Tickets/MD_TB_TicketAdjuntos.js';
 import MD_TB_Tickets from '../../Models/Tickets/MD_TB_Tickets.js';
 import MD_TB_Usuarios from '../../Models/Core/MD_TB_Usuarios.js';
+import MD_TB_TicketEstadosHistorial from '../../Models/Tickets/MD_TB_TicketEstadosHistorial.js';
 
 import {
   toRelativeFromRoot,
@@ -43,8 +44,14 @@ import fs from 'fs';
 const { TicketAdjuntosModel } = MD_TB_TicketAdjuntos;
 const { TicketsModel } = MD_TB_Tickets;
 const { UsuariosModel } = MD_TB_Usuarios;
+const { TicketEstadosHistorialModel } = MD_TB_TicketEstadosHistorial;
 
-const ESTADOS_EDITABLES = ['abierto', 'pendiente'];
+const ESTADOS_EDITABLES = ['abierto', 'pendiente', 'pendiente_adjuntos'];
+
+import {
+  crearNotificacionesPorTicketCreado,
+  enviarEmailsPorTicketCreado
+} from '../../Utils/notificacionesTicketService.js';
 
 /**
  * Util interno: limpia objetos (quita '', null, undefined).
@@ -309,11 +316,15 @@ export const FILE_TicketAdjunto_CTS = async (req, res) => {
 
     const absPath = resolveSafeUploadPath(adjunto.ruta_archivo);
     if (!fs.existsSync(absPath)) {
-      return res.status(404).json({ mensajeError: 'Archivo no existe en disco' });
+      return res
+        .status(404)
+        .json({ mensajeError: 'Archivo no existe en disco' });
     }
 
     const download = String(req.query.download || '0') === '1';
-    const filename = (adjunto.nombre_original || path.basename(absPath)).replace(/"/g, '');
+    const filename = (
+      adjunto.nombre_original || path.basename(absPath)
+    ).replace(/"/g, '');
 
     res.setHeader(
       'Content-Disposition',
@@ -343,8 +354,9 @@ export const FILE_TicketAdjunto_CTS = async (req, res) => {
 //
 // Soporta también el modo legacy .single('archivo') (req.file)
 // ===================================================
-
 export const CR_TicketAdjunto_CTS = async (req, res) => {
+  let transaction;
+
   try {
     const ticketIdParam = req.params.ticketId || req.body.ticket_id;
     if (!ticketIdParam) {
@@ -363,28 +375,32 @@ export const CR_TicketAdjunto_CTS = async (req, res) => {
     const { id: usuarioIdCtx, rol } = getUserContext(req);
     const usuarioLog = usuarioIdCtx || req.body.usuario_log_id || null;
 
-    // 🔹 Normalizar archivos: soportar array('files') y single('archivo')
+    // Normalizar archivos
     let files = [];
-    if (Array.isArray(req.files) && req.files.length > 0) {
-      files = req.files; // caso moderno: array('files')
-    } else if (req.file) {
-      files = [req.file]; // caso legacy: single('archivo')
-    }
+    if (Array.isArray(req.files) && req.files.length > 0) files = req.files;
+    else if (req.file) files = [req.file];
 
     if (!files || files.length === 0) {
       return res.status(400).json({
         mensajeError:
-          'No se recibió ningún archivo. Enviar archivos en el campo "files" (o "archivo").'
+          'No se recibió ningún archivo. Enviar en "files" (o "archivo").'
       });
     }
 
-    // Buscar ticket y validar permisos + estado editable
-    const ticket = await TicketsModel.findByPk(ticketId);
+    transaction = await TicketsModel.sequelize.transaction();
+
+    //  Ticket con lock
+    const ticket = await TicketsModel.findByPk(ticketId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
+
+    // permisos + estado editable (asegurate de permitir pendiente_adjuntos)
     assertTicketPermission(ticket, { id: usuarioIdCtx, rol }, true);
 
     let { tipo, es_principal } = req.body;
 
-    // 🔹 Normalizar es_principal (desde body)
+    // Normalizar es_principal
     let esPrincipalGlobal = false;
     if (es_principal !== undefined) {
       if (typeof es_principal === 'string') {
@@ -395,75 +411,141 @@ export const CR_TicketAdjunto_CTS = async (req, res) => {
         esPrincipalGlobal = Boolean(es_principal);
       }
     } else {
-      // Si no se mandó es_principal y aún no hay ninguno, ponemos true al primero
       const countPrincipal = await TicketAdjuntosModel.count({
-        where: { ticket_id: ticketId, es_principal: 1 }
+        where: { ticket_id: ticketId, es_principal: 1 },
+        transaction
       });
-      if (countPrincipal === 0) {
-        esPrincipalGlobal = true;
-      }
+      if (countPrincipal === 0) esPrincipalGlobal = true;
     }
 
-    // Si se marcó como principal, desmarcamos otros del mismo ticket
     if (esPrincipalGlobal) {
       await TicketAdjuntosModel.update(
         { es_principal: 0 },
-        { where: { ticket_id: ticketId } }
+        { where: { ticket_id: ticketId }, transaction }
       );
     }
 
     const nuevosAdjuntos = [];
+    let subioAlgunaImagenEnEsteRequest = false;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const { originalname, mimetype, size, path: absolutePath } = file;
       const rutaRelativa = toRelativeFromRoot(absolutePath);
 
-      // Determinar tipo final
       let tipoFinal = tipo;
-      if (!tipoFinal || !['imagen', 'excel', 'pdf', 'otro'].includes(tipoFinal)) {
+      if (
+        !tipoFinal ||
+        !['imagen', 'excel', 'pdf', 'otro'].includes(tipoFinal)
+      ) {
         tipoFinal = inferTipoFromMime(mimetype);
       }
 
-      // Solo el primer archivo se marca como principal (si corresponde)
+      if (tipoFinal === 'imagen') subioAlgunaImagenEnEsteRequest = true;
+
       const esPrincipalAdj = esPrincipalGlobal && i === 0;
 
-      const nuevoAdjunto = await TicketAdjuntosModel.create({
-        ticket_id: ticketId,
-        tipo: tipoFinal,
-        nombre_original: originalname,
-        ruta_archivo: rutaRelativa,
-        mime_type: mimetype,
-        tamano_bytes: size,
-        es_principal: esPrincipalAdj ? 1 : 0
-      });
+      const nuevoAdjunto = await TicketAdjuntosModel.create(
+        {
+          ticket_id: ticketId,
+          tipo: tipoFinal,
+          nombre_original: originalname,
+          ruta_archivo: rutaRelativa,
+          mime_type: mimetype,
+          tamano_bytes: size,
+          es_principal: esPrincipalAdj ? 1 : 0
+        },
+        { transaction }
+      );
 
       nuevosAdjuntos.push(nuevoAdjunto);
+    }
 
-      // Log de actividad por cada adjunto
+    //  Si estaba en borrador, y ahora hay al menos 1 imagen, finalizamos
+    let finalizoTicket = false;
+
+    if (String(ticket.estado) === 'pendiente_adjuntos') {
+      const adjCount = await TicketAdjuntosModel.count({
+        where: { ticket_id: ticketId },
+        transaction
+      });
+
+      if (adjCount >= 1) {
+        await ticket.update({ estado: 'pendiente' }, { transaction });
+        await ticket.reload({ transaction });
+
+        await TicketEstadosHistorialModel.create(
+          {
+            ticket_id: ticketId,
+            estado_anterior: 'pendiente_adjuntos',
+            estado_nuevo: 'pendiente',
+            usuario_id: usuarioIdCtx,
+            comentario: 'Adjuntos cargados. Ticket habilitado.'
+          },
+          { transaction }
+        );
+
+        await crearNotificacionesPorTicketCreado({ ticket, transaction });
+        finalizoTicket = true;
+      }
+    }
+
+    await transaction.commit();
+
+    // Logs fuera de transacción (como vos ya hacías)
+    for (const a of nuevosAdjuntos) {
       await registrarLogActividad({
         usuario_id: usuarioLog,
         modulo: 'ticket_adjuntos',
         accion: 'CREAR',
         entidad: 'ticket_adjunto',
-        entidad_id: nuevoAdjunto.id,
-        descripcion: `El usuario ${usuarioLog} agregó un adjunto al ticket #${ticketId} (adjunto #${nuevoAdjunto.id}, tipo=${tipoFinal}, nombre="${originalname}").`,
+        entidad_id: a.id,
+        descripcion: `El usuario ${usuarioLog} agregó un adjunto al ticket #${ticketId} (adjunto #${a.id}, tipo=${a.tipo}, nombre="${a.nombre_original}").`,
         ip: req.ip,
         user_agent: req.headers['user-agent']
       });
     }
 
-    res.json({
+    if (finalizoTicket) {
+      await registrarLogActividad({
+        usuario_id: usuarioLog,
+        modulo: 'tickets',
+        accion: 'CONFIRMAR',
+        entidad: 'ticket',
+        entidad_id: ticketId,
+        descripcion: `El usuario ${usuarioLog} confirmó el ticket #${ticketId} al adjuntar imágenes (estado=pendiente).`,
+        ip: req.ip,
+        user_agent: req.headers['user-agent']
+      });
+
+      // Emails en background
+      enviarEmailsPorTicketCreado(ticketId).catch((err) => {
+        console.error(
+          `[CR_TicketAdjunto_CTS] Error al enviar emails ticket #${ticketId}:`,
+          err.message
+        );
+      });
+    }
+
+    return res.json({
       message:
         nuevosAdjuntos.length === 1
           ? 'Adjunto creado correctamente'
           : `${nuevosAdjuntos.length} adjuntos creados correctamente`,
-      adjuntos: nuevosAdjuntos
+      adjuntos: nuevosAdjuntos,
+      ticketFinalizado: finalizoTicket // útil para el front
     });
   } catch (error) {
     console.error('[CR_TicketAdjunto_CTS] error:', error);
+
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (e) {}
+    }
+
     const status = error.statusCode || 500;
-    res.status(status).json({ mensajeError: error.message });
+    return res.status(status).json({ mensajeError: error.message });
   }
 };
 

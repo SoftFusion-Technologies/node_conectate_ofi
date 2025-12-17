@@ -41,10 +41,12 @@ export const TicketEstadosHistorialModel = db.define(
         'pendiente',
         'autorizado',
         'rechazado',
-        'cerrado'
+        'cerrado',
+        'pendiente_adjuntos'
       ),
       allowNull: true,
-      comment: 'Estado previo (NULL si es el primer registro de estado)'
+      defaultValue: null,
+      comment: 'Estado previo (NULL si es el primero)'
     },
 
     estado_nuevo: {
@@ -53,7 +55,8 @@ export const TicketEstadosHistorialModel = db.define(
         'pendiente',
         'autorizado',
         'rechazado',
-        'cerrado'
+        'cerrado',
+        'pendiente_adjuntos'
       ),
       allowNull: false,
       comment: 'Nuevo estado aplicado al ticket'
