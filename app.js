@@ -72,12 +72,12 @@ if (process.env.NODE_ENV !== 'production') {
 const app = express();
 
 /*  🔑 CORS configurado con whitelist y credenciales */
-const CORS_WHITELIST = new Set([
+const CORS_WHITELIST = [
   'https://conectategroup.ar',
   'https://www.conectategroup.ar',
   'http://localhost:5173',
   'http://127.0.0.1:5173'
-]);
+];
 
 const corsOptions = {
   origin(origin, cb) {
