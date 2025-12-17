@@ -81,6 +81,7 @@ import {
 import {
   OBRS_TicketAdjuntos_CTS,
   OBR_TicketAdjunto_CTS,
+  FILE_TicketAdjunto_CTS,
   CR_TicketAdjunto_CTS,
   ER_TicketAdjunto_CTS
 } from '../Controllers/Tickets/CTS_TB_TicketAdjuntos.js';
@@ -183,6 +184,11 @@ router.get(
 
 // Obtener un adjunto puntual
 router.get('/tickets/adjuntos/:id', authenticateToken, OBR_TicketAdjunto_CTS);
+router.get(
+  '/tickets/adjuntos/:id/file',
+  authenticateToken,
+  FILE_TicketAdjunto_CTS
+);
 
 // Crear adjunto para un ticket (subida de archivo)
 router.post(

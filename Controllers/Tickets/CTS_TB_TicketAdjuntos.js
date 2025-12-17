@@ -38,6 +38,7 @@ import {
 } from '../../Utils/fileManager.js';
 
 import { registrarLogActividad } from '../Logs/CTS_TB_LogsActividad.js';
+import fs from 'fs';
 
 const { TicketAdjuntosModel } = MD_TB_TicketAdjuntos;
 const { TicketsModel } = MD_TB_Tickets;
@@ -120,6 +121,20 @@ const assertTicketPermission = (
     err.statusCode = 400;
     throw err;
   }
+};
+const BASE_UPLOAD_DIR = path.join(process.cwd(), 'uploads');
+
+const resolveSafeUploadPath = (rutaRelativa) => {
+  const rel = String(rutaRelativa || '').replace(/^\/+/, '');
+  const abs = path.resolve(process.cwd(), rel);
+
+  // Evita path traversal y asegura que quede dentro de /uploads
+  if (!abs.startsWith(BASE_UPLOAD_DIR)) {
+    const err = new Error('Ruta de archivo inválida');
+    err.statusCode = 400;
+    throw err;
+  }
+  return abs;
 };
 
 // ===================================================
@@ -261,6 +276,58 @@ export const OBR_TicketAdjunto_CTS = async (req, res) => {
     console.error('[OBR_TicketAdjunto_CTS] error:', error);
     const status = error.statusCode || 500;
     res.status(status).json({ mensajeError: error.message });
+  }
+};
+
+// ===================================================
+// 2.1) Ver/Descargar archivo de un adjunto
+// GET /tickets/adjuntos/:id/file?download=1
+// - inline: default
+// - download=1 => attachment
+// ===================================================
+
+export const FILE_TicketAdjunto_CTS = async (req, res) => {
+  try {
+    const { id: usuarioIdCtx, rol } = getUserContext(req);
+
+    const adjunto = await TicketAdjuntosModel.findByPk(req.params.id, {
+      include: [
+        {
+          model: TicketsModel,
+          as: 'ticket',
+          attributes: ['id', 'usuario_creador_id', 'estado', 'sucursal_id']
+        }
+      ]
+    });
+
+    if (!adjunto) {
+      return res.status(404).json({ mensajeError: 'Adjunto no encontrado' });
+    }
+
+    // Permisos sobre el ticket
+    assertTicketPermission(adjunto.ticket, { id: usuarioIdCtx, rol }, false);
+
+    const absPath = resolveSafeUploadPath(adjunto.ruta_archivo);
+    if (!fs.existsSync(absPath)) {
+      return res.status(404).json({ mensajeError: 'Archivo no existe en disco' });
+    }
+
+    const download = String(req.query.download || '0') === '1';
+    const filename = (adjunto.nombre_original || path.basename(absPath)).replace(/"/g, '');
+
+    res.setHeader(
+      'Content-Disposition',
+      `${download ? 'attachment' : 'inline'}; filename="${filename}"`
+    );
+
+    if (adjunto.mime_type) {
+      res.setHeader('Content-Type', adjunto.mime_type);
+    }
+
+    return res.sendFile(absPath);
+  } catch (error) {
+    console.error('[FILE_TicketAdjunto_CTS] error:', error);
+    res.status(error.statusCode || 500).json({ mensajeError: error.message });
   }
 };
 
@@ -485,6 +552,7 @@ export const ER_TicketAdjunto_CTS = async (req, res) => {
 export default {
   OBRS_TicketAdjuntos_CTS,
   OBR_TicketAdjunto_CTS,
+  FILE_TicketAdjunto_CTS,
   CR_TicketAdjunto_CTS,
   ER_TicketAdjunto_CTS
 };
